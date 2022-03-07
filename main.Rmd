@@ -1,0 +1,346 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Libraries
+```{r}
+library(dplyr)
+library(fda)
+library(fda.usc)
+library(fdANOVA)
+library(plotrix)
+library(ggplot2)
+library(tidyverse)
+library(ggrepel)
+
+set.seed(42)
+```
+
+```{r}
+#  Population distributions
+missi.dis = read.csv("Black community in percents by county.csv", header = T)
+alab.dis = read.csv("new/Alabama-racial.csv", header = T)
+lous.dis = read.csv("new/Lousiana-racial.csv", header = T)
+tex.dis = read.csv("new/Texas-racial.csv", header = T)
+
+#  Polutant PM2.5 information
+alab.pm = read.csv("new/Alabama-pm25-data-2016.csv", header = T)
+missi.pm = read.csv("new/Mississippi-pm25-2016.csv", header = T)
+lous.pm = read.csv("new/Lousiana-pm25-data-2016.csv", header = T)
+tex.pm = read.csv("new/Texas-pm25-data-2016.csv", header = T)
+
+#  Find unique counties to use it later for filters (remove redundant counties that give almost no information)
+alab.target = unique(alab.pm$COUNTY)
+alab.target = alab.target[c(1:8,10,11,12,15)]
+
+missi.target = unique(missi.pm$COUNTY)
+missi.target = missi.target[c(2:7)]
+
+lous.target = unique(lous.pm$COUNTY)
+lous.target = lous.target[c(2,3,5,10,11,15,16)]
+
+tex.target = unique(tex.pm$COUNTY)
+tex.target = tex.target[c(1,3,4,5,24)]
+
+#  Remove counties that do not have data in both datasets
+missi.race = missi.dis[missi.dis$County %in% missi.target,]
+alab.race = alab.dis[alab.dis$County %in% alab.target,]
+lous.race = lous.dis[lous.dis$County %in% lous.target,]
+tex.race = tex.dis[tex.dis$County %in% tex.target,]
+
+#  Table for functional linear regression later
+races.data = c(alab.race[,2], missi.race[,2], lous.race[,2], tex.race[,2])
+names(races.data) = c(alab.target, missi.target, lous.target, tex.target)
+races.data = log(races.data)
+
+#  PM2.5 concentrations
+alab.pm = alab.pm[,c("Date", "Daily.Mean.PM2.5.Concentration", "COUNTY", "POC")] %>% filter(POC == 1)
+missi.pm = missi.pm[,c("Date", "Daily.Mean.PM2.5.Concentration", "COUNTY", "POC")] %>% filter(POC == 1)
+lous.pmt = lous.pm[,c("Date", "Daily.Mean.PM2.5.Concentration", "COUNTY", "POC")] %>% filter(POC == 1)
+tex.pm = tex.pm[,c("Date", "Daily.Mean.PM2.5.Concentration", "COUNTY", "POC")] %>% filter(POC == 1)
+
+#  Split data by counties
+alab.split = split(alab.pm, with(alab.pm, interaction(COUNTY)), drop = TRUE)
+missi.split = split(missi.pm, with(missi.pm, interaction(COUNTY)), drop = TRUE)
+lous.split = split(lous.pmt, with(lous.pmt, interaction(COUNTY)), drop = TRUE)
+tex.split = split(tex.pm, with(tex.pm, interaction(COUNTY)), drop = TRUE)
+```
+
+Manually review every county information since it is very messy, have many null values, distortions and etc...
+```{r}
+#  Alabama
+alab.split$Baldwin = alab.split$Baldwin[-sample(1:nrow(alab.split$Baldwin), 12),]
+alab.split$Clay = alab.split$Clay[-sample(1:nrow(alab.split$Clay), 7),]
+alab.split$Colbert = alab.split$Colbert[-sample(1:nrow(alab.split$Colbert), 7),]
+alab.split$DeKalb = alab.split$DeKalb[-sample(1:nrow(alab.split$DeKalb), 7),]
+alab.split$Etowah = alab.split$Etowah[-sample(1:nrow(alab.split$Etowah), 4),]
+alab.split$Houston = alab.split$Houston[-sample(1:nrow(alab.split$Houston), 8),]
+
+alab.split$Jefferson = alab.split$Jefferson[1:124,]
+alab.split$Jefferson = alab.split$Jefferson[-sample(1:nrow(alab.split$Jefferson), 16),]
+
+alab.split$Lawrence = alab.split$Lawrence[-sample(1:nrow(alab.split$Lawrence), 9),]
+alab.split$Mobile = alab.split$Mobile[-sample(1:nrow(alab.split$Mobile), 12),]
+alab.split$Montgomery = alab.split$Montgomery[-sample(1:nrow(alab.split$Montgomery), 12),]
+alab.split$Morgan = alab.split$Morgan[-sample(1:nrow(alab.split$Morgan), 11),]
+alab.split$Talladega = alab.split$Talladega[-sample(1:nrow(alab.split$Talladega), 8),]
+
+alab.data = data.matrix(cbind(alab.split$Baldwin[,2], alab.split$Clay[,2], alab.split$Colbert[,2], alab.split$DeKalb[,2], alab.split$Etowah[,2], alab.split$Houston[,2],alab.split$Jefferson[,2], alab.split$Lawrence[,2], alab.split$Mobile[,2], alab.split$Montgomery[,2], alab.split$Morgan[,2], alab.split$Talladega[,2]))
+
+#  Mississippi
+missi.split$Forrest = missi.split$Forrest[-sample(1:nrow(missi.split$Forrest), 9),]
+missi.split$Hancock = missi.split$Hancock[-sample(1:nrow(missi.split$Hancock), 10),]
+missi.split$Harrison = missi.split$Harrison[-sample(1:nrow(missi.split$Harrison), 7),]
+missi.split$Hinds = missi.split$Hinds[1:118,]
+missi.split$Hinds = missi.split$Hinds[-sample(1:nrow(missi.split$Hinds), 9),]
+missi.split$Jackson = missi.split$Jackson[-sample(1:nrow(missi.split$Jackson), 10),]
+
+missi.data = data.matrix(cbind(missi.split$Forrest[,2], missi.split$Grenada[,2], missi.split$Hancock[,2], missi.split$Harrison[,2], missi.split$Hinds[,2], missi.split$Jackson[,2]))
+
+#  louisiana
+lous.split$Caddo = lous.split$Caddo[-sample(1:nrow(lous.split$Caddo), 13),]
+lous.split$Calcasieu = lous.split$Calcasieu[-sample(1:nrow(lous.split$Calcasieu), 16),]
+lous.split$Iberville = lous.split$Iberville[-sample(1:nrow(lous.split$Iberville), 10),]
+lous.split$Orleans = lous.split$Orleans[1:122,]
+lous.split$Orleans = lous.split$Orleans[-sample(1:nrow(lous.split$Orleans), 13),]
+lous.split$Ouachita = lous.split$Ouachita[-sample(1:nrow(lous.split$Ouachita), 16),]
+lous.split$Tangipahoa = lous.split$Tangipahoa[-sample(1:nrow(lous.split$Tangipahoa), 4),]
+lous.split$Terrebonne = lous.split$Terrebonne[-sample(1:nrow(lous.split$Terrebonne), 11),]
+
+lous.data = data.matrix(cbind(lous.split$Caddo[,2], lous.split$Calcasieu[,2], lous.split$Iberville[,2], lous.split$Orleans[,2], lous.split$Ouachita[,2], lous.split$Tangipahoa[,2], lous.split$Terrebonne[,2]))
+
+#  Texas
+tex.split$Bexar = tex.split$Bexar[-sample(1:nrow(tex.split$Bexar), 10),]
+tex.split$Brewster = tex.split$Brewster[-sample(1:nrow(tex.split$Brewster), 9),]
+tex.split$Cameron = tex.split$Cameron[-sample(1:nrow(tex.split$Cameron), 2),]
+tex.split$Culberson = tex.split$Culberson[-sample(1:nrow(tex.split$Culberson), 4),]
+tex.split$Nueces = tex.split$Nueces[-sample(1:nrow(tex.split$Nueces), 11),]
+
+tex.data = data.matrix(cbind(tex.split$Bexar[,2], tex.split$Brewster[,2], tex.split$Cameron[,2], tex.split$Culberson[,2], tex.split$Nueces[,2]))
+
+full.data = cbind(alab.data, missi.data, lous.data, tex.data)
+colnames(full.data) = c(alab.target, missi.target, lous.target, tex.target)```
+```
+
+
+Data looks pretty much periodic, hence fourier basis is the best fit, b-spline behaves really strangly around bounds and outliers
+```{r}
+B25.basis=create.fourier.basis(rangeval=c(0,109),nbasis=7)
+W.fd=smooth.basis(y=full.data, fdParobj=B25.basis)
+
+plot(W.fd$fd, ylab = "PM2.5 concentration", xlab = "Monitoring")
+abline(10,0, lty = 3, col = 'red', lwd = '5')
+```
+
+PCA analysis
+```{r}
+#  Check PCA and Rotated PCA should give more separable variations
+pca.list = pca.fd(W.fd$fd, 2)
+rot.pca.list = varmx.pca.fd(pca.list)
+
+print(pca.list$varprop)
+print(rot.pca.list$varprop)
+
+#  Compare
+par(mfrow=c(2,1))
+plot.pca.fd(pca.list)
+plot(rot.pca.list)
+```
+
+
+Rotated PCA graphs
+```{r}
+scores = rot.pca.list$scores
+
+cols = c(rep("red", 12), rep("blue", 6), rep("green",7), rep("black",5))
+plot(scores[,1], scores[,2], type = "p", pch = "o", col = cols, xlim = c(-28, 28), xlab = "First principal component score", ylab="Second principal component score")
+legend(-20, -10, legend=c("Alabama", "Mississippi", "Louisiana", "Texas"),
+       col=c("red", "blue", "green", "black"), pch = "o", cex=0.8)
+spread.labels(scores[,1], scores[,2],labels= c(1:30), srt =0, offsets = 0.5)
+
+
+df = data.frame(scores[,1], scores[,2])
+colnames(df) = c("sc1", "sc2")
+row.names(df) = c(alab.target, missi.target, lous.target, tex.target)
+df$counties <- rownames(df)
+
+#  Create a map with sc1 vs sc2 to look for outliers and segment counties easier
+p <- ggplot(df, aes(sc1, sc2, label = counties)) +
+  geom_point(color = "red")
+
+p1 <- p + geom_text() + labs(title = "geom_text()")
+
+p2 <- p + geom_text_repel() + labs(title = "geom_text_repel()")
+
+ggplot(df) +
+    geom_point(aes(sc1, sc2), color = cols,show.legend = TRUE) +
+    geom_text_repel(aes(sc1, sc2, label = rownames(df)), size = 2.5) +
+    scale_colour_manual(name = 'Legend', 
+                      guide = 'legend',
+                      values = c('red' = 'red',
+                                 'blue' = 'blue'), 
+                      labels = c('SMA(50)',
+                                 'SMA(200)'))
+```
+
+Supported by the graphic above, we can analyze specific counties and its behaviour, for instance the 17th county:
+```{r}
+plot(W.fd, ylab="y", xlab="x",col = cols,type = "l")
+lines(W.fd$fd[c(17)], lty = 2, lwd =3)
+```
+
+Depth analysis
+```{r}
+boxplot.fd(W.fd$fd, method = "MBD", prob = 0.5, plot = FALSE)#$depth
+
+par(mfrow=c(2,1)) 
+plot(W.fd, ylab="y", xlab="x",col = cols,type = "l",lwd = 2)
+lines(W.fd$fd[c(7,19,23,25,27,28,29,30)],col = c("black", "blue"),lwd = 3)
+lines(W.mean, lty = 2, lwd =3)
+
+plot(W.fd, ylab="y", xlab="x",col = cols,type = "l",lwd = 2)
+lines(W.fd$fd[c(15,1)],col = c("black", "blue"),lwd = 3)
+lines(W.mean, lty = 2, lwd =3)
+
+#  BD depths 
+boxplot.fd(W.fd$fd, method = "BD2", depth = NULL, plot = FALSE)#$depth
+
+plot(W.fd, ylab="PM2.5 concentration functional data", xlab="Monitoring",col = cols,type = "l",lwd = 2)
+lines(W.fd$fd[c(27,28,29,30)],col = c("black", "blue"),lwd = 3)
+```
+
+Descriptive statistics
+```{r}
+W.mean = mean.fd(W.fd$fd)
+
+plot(W.fd, ylab="y", xlab="x",col = cols,type = "l")
+lines(W.mean, lty = 2, lwd =3)
+
+#  Covariance countor
+W.cov = var.fd(W.fd$fd) #basis is the same so is grid 25x25
+grid = (1:sqrt(110))*sqrt(110) #sizes of basis
+W.cov.mat = eval.bifd(grid, grid, W.cov)
+
+persp(grid, grid, W.cov.mat, xlab = "s", ylab = "t", zlab = "c(s,t)")
+contour(grid, grid, W.cov.mat, lwd = 2)
+```
+
+
+Registration to remove error from geographical difference of counties:
+```{r}
+#  Calculate acceleration and its mean
+accelfdUN = deriv.fd(W.fd$fd,2)
+accelmeanfdUN = mean.fd(accelfdUN)
+#plot(accelfdUN)
+
+#  Create a vector for locator and x-axis vector
+PGSctr = rep(0,20)
+agefine = seq(0,109, length = 110)
+
+#  Function to manually label THE SAME POINTS (register the same moment in time-series)
+par(mfrow = c(1,1))
+for (icase in 1:30) {
+  accveci = predict(accelfdUN[icase], agefine)
+  windows()
+  plot(agefine, accveci, "l", ylim = c(-0.1,0.1),
+       xlab="days", ylab = "PM2.5 concentration in air",
+       main=paste("Case", icase))
+  lines(c(0,109), c(0,0),lty = 2)
+  
+  PGSctr[icase] = locator(1)
+}
+
+#  Find registered data mean and approximate it
+PGSctrmean = mean(sapply(PGSctr,mean))
+wbasisLM = create.bspline.basis(c(0,109), 4, 3, c(0, PGSctrmean, 109))
+WfdLM = fd(matrix(c(0:3)), wbasisLM)
+WfdParLM = fdPar(WfdLM,1,10^(-12))
+regListLM = landmarkreg(accelfdUN, sapply(PGSctr,mean), PGSctrmean, WfdParLM, TRUE)
+accelfdLM = regListLM$regfd
+accelmeanfdLM = mean.fd(accelfdLM)
+warpfdLM = regListLM$warpfd
+WfdLM = regListLM$Wfd
+
+#  Registered plot of time-series, from this point we can compare descriptive measures without altitude error
+boxplot.fd(regListLM$regfd, method = "BD2", depth = NULL, plot = FALSE)
+
+plot(regListLM$regfd, ylab="D value", xlab="Monitoring",col = cols,type = "l",lwd = 2)
+lines(regListLM$regfd[c(28, 30)],col = c("black", "blue"),lwd = 3)
+```
+
+Anova test to investigate if any state has significantly higher polution than any other
+```{r}
+#  Set group labels for every county
+group.label <- c(rep(1, 12), rep(2,6), rep(3,7),rep(4,5)) # label i = 1,2,3 states to determine what groups are 
+
+#  Run fanova test
+fanova.X.gaussian <- fanova.tests(x = full.data, group.label = group.label)
+fanova.X.gaussian$FP$pvalueFP
+
+plotFANOVA(x = full.data,
+            group.label = as.character(group.label),
+            int = c(0,109),
+           means = TRUE)
+```
+
+Functional linear regression 
+```{r}
+tempbasis65  = create.fourier.basis(c(0,109),11)
+tempSmooth65 = smooth.basis(y=full.data, fdParobj=tempbasis65)
+tempfd65     = tempSmooth65$fd
+
+#  Base for constant parameter
+templist      = vector("list",2)
+templist[[1]] = rep(1,30) # intercept
+templist[[2]] = tempfd65
+
+#  Base for beta coefficient
+conbasis = create.constant.basis(c(0,109))
+betabasis = create.fourier.basis(c(0,109),7)
+betalist = vector("list", 2)
+betalist[[1]] = conbasis
+betalist[[2]] = betabasis
+
+#  Regress on race data and polution
+fRegressList = fRegress(races.data, templist, betalist)
+betaestlist = fRegressList$betaestlist
+tempbetafd = betaestlist[[2]]$fd
+
+plot(tempbetafd, xlab= "Monitoring time", ylab="Beta value for pollution")
+```
+
+Penalized functional linear regression + CI of Beta
+```{r}
+resid   = races.data - annualprechat1
+SigmaE. = sum(resid^2)/(30-fRegressList$df)
+SigmaE  = SigmaE.*diag(rep(1,30))
+y2cMap  = tempSmooth65$y2cMap
+
+stderrList = fRegress.stderr(fRegressList, y2cMap, SigmaE)
+
+betafdPar      = betaestlist[[2]]
+betafd         = betafdPar$fd
+betastderrList = stderrList$betastderrlist
+betastderrfd   = betastderrList[[2]]
+
+plot(betafd, xlab="Pollution monitoring", ylab="Pollution beta coeff. with CI of 95%", ylim= c(-0.051, 0.065),
+      lwd=2)
+lines(betafd+2*betastderrfd, lty=2, lwd=1)
+lines(betafd-2*betastderrfd, lty=2, lwd=1)
+```
+
+Calculate measures
+```{r}
+hat = fRegressList$yhatfdobj # Predicted values
+hat = races.data - hat  # Residual values
+
+SSE1 = sum(hat^2)
+SSE0 = sum((races.data - mean(races.data))^2)
+
+RSQ1 = (SSE0 - SSE1)/SSE0
+Fratio1 = ((SSE0 - SSE1 )/8) / (SSE1/21)
+
+plot(hat , races.data, col= "black", pch = "+", cex = 1.2, xlab = "log percentage of black population predicted", ylab= "True log percentage of black population")
+abline(lm(races.data ~ hat))
+```
